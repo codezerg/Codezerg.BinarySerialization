@@ -77,6 +77,14 @@ for (int i = 0; i < count; i++)
 }
 ```
 
+**Note:** `Write()` vs `WriteKey()` for map keys:
+```csharp
+writer.Write("name");     // Writes key as regular string each time
+writer.WriteKey("name");  // Interns the key - first call stores it, subsequent calls write only ID (1-2 bytes)
+```
+
+Use `WriteKey()` when the same key appears multiple times (e.g., arrays of objects).
+
 ## High-Level Serialization
 
 ### Attributes
@@ -121,6 +129,49 @@ var options = new SerializerOptions
 
 var bytes = BinarySerializer.Serialize(obj, options);
 ```
+
+### Schema Evolution
+
+The deserializer handles schema mismatches gracefully, making it safe for versioned APIs:
+
+| Scenario | Behavior |
+|----------|----------|
+| Extra properties in data | Silently ignored |
+| Missing properties in data | Keep default values |
+| Type mismatch (e.g., string where int expected) | Property keeps default value |
+| Completely unknown properties | Skipped |
+
+**Example: Forward Compatibility**
+```csharp
+// V1 of your class
+public class PersonV1
+{
+    public string Name { get; set; } = "";
+    public int Age { get; set; }
+}
+
+// V2 adds new properties
+public class PersonV2
+{
+    public string Name { get; set; } = "";
+    public int Age { get; set; }
+    public string Email { get; set; } = "";  // New in V2
+}
+
+// Data serialized with V2 can be read by V1 code
+var v2Data = BinarySerializer.Serialize(new PersonV2 { Name = "Alice", Age = 30, Email = "a@test.com" });
+var person = BinarySerializer.Deserialize<PersonV1>(v2Data);  // Works! Email is ignored
+```
+
+**Example: Backward Compatibility**
+```csharp
+// Old data (V1) can be read into new class (V2)
+var v1Data = BinarySerializer.Serialize(new PersonV1 { Name = "Bob", Age = 25 });
+var person = BinarySerializer.Deserialize<PersonV2>(v1Data);
+// person.Email will be "" (default value)
+```
+
+This works with nested objects and collections too.
 
 ### DataTable, DataSet, and IDataReader
 
@@ -240,6 +291,19 @@ reader.ReadEnd();
 | Binary | `Write(byte[])`, `Write(ReadOnlySpan<byte>)`, `ReadBinary()` |
 | Arrays | `WriteArrayHeader(count)`, `BeginArray()`, `ReadArrayHeader()` |
 | Maps | `WriteMapHeader(count)`, `BeginMap()`, `ReadMapHeader()` |
+| End (streaming) | `WriteEnd()`, `ReadEnd()`, `IsEnd()` |
+
+## Performance Tips
+
+| Technique | Best For | Space Savings |
+|-----------|----------|---------------|
+| Key interning (`WriteKey`) | Repeated property names in arrays of objects | ~30% |
+| Struct templates | Homogeneous arrays where all objects have same shape | ~40-50% |
+| Neither | One-off objects, heterogeneous data | N/A |
+
+- Use key interning when serializing arrays of objects with the same properties
+- Use struct templates when all objects have identical fields in the same order
+- The high-level API uses key interning automatically when `UseKeyInterning = true`
 
 ## Security
 
@@ -257,6 +321,21 @@ var limits = new ReaderLimits
 
 using var reader = new BinarySerializationReader(stream, limits: limits);
 ```
+
+## Exceptions
+
+The library throws the following exceptions:
+
+| Exception | When |
+|-----------|------|
+| `ArgumentNullException` | Stream is null |
+| `InvalidDataException` | Corrupt/invalid binary format, type marker mismatch |
+| `EndOfStreamException` | Unexpected end of data |
+| `NotSupportedException` | `PeekType()`/`ReadKey()` on non-seekable stream |
+
+**Limit violations** (when using `ReaderLimits`):
+- String/binary exceeds max length → `InvalidDataException`
+- Key/struct table exceeds max size → `InvalidDataException`
 
 ## Binary Format
 
