@@ -8,7 +8,7 @@
 
 		<!-- NuGet Package Metadata -->
 		<PackageId>Codezerg.BinarySerialization</PackageId>
-		<Version>1.0.0</Version>
+		<Version>1.1.0</Version>
 		<Authors>Codezerg</Authors>
 		<Description>High-performance .NET binary serialization library featuring key interning, struct templates, and streaming support.</Description>
 		<PackageTags>binary;serialization;performance;streaming</PackageTags>
