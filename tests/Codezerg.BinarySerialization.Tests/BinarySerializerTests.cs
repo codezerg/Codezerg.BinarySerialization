@@ -526,4 +526,90 @@ public class DataTableSerializationTests
         Assert.NotNull(result);
         Assert.Empty(result.Rows);
     }
+
+    [Fact]
+    public void SerializesDictionaryStringObject()
+    {
+        var dict = new Dictionary<string, object>
+        {
+            { "name", "Alice" },
+            { "age", 30 },
+            { "active", true },
+            { "score", 3.14 },
+            { "tags", new List<string> { "a", "b" } }
+        };
+
+        var bytes = BinarySerializer.Serialize(dict);
+        var restored = BinarySerializer.Deserialize<Dictionary<string, object>>(bytes);
+
+        Assert.NotNull(restored);
+        Assert.Equal(5, restored.Count);
+        Assert.Equal("Alice", restored["name"]);
+        Assert.Equal(30L, restored["age"]); // integers become long
+        Assert.Equal(true, restored["active"]);
+        Assert.Equal(3.14, restored["score"]);
+    }
+
+    [Fact]
+    public void SerializesDictionaryStringObjectWithNulls()
+    {
+        var dict = new Dictionary<string, object?>
+        {
+            { "name", "Bob" },
+            { "value", null }
+        };
+
+        var bytes = BinarySerializer.Serialize(dict);
+        var restored = BinarySerializer.Deserialize<Dictionary<string, object?>>(bytes);
+
+        Assert.NotNull(restored);
+        Assert.Equal(2, restored.Count);
+        Assert.Equal("Bob", restored["name"]);
+        Assert.Null(restored["value"]);
+    }
+
+    [Fact]
+    public void SerializesDictionaryStringObjectNested()
+    {
+        var dict = new Dictionary<string, object>
+        {
+            { "user", new Dictionary<string, object> { { "id", 1 }, { "name", "Alice" } } },
+            { "items", new List<object> { 1, "two", 3.0 } }
+        };
+
+        var bytes = BinarySerializer.Serialize(dict);
+        var restored = BinarySerializer.Deserialize<Dictionary<string, object>>(bytes);
+
+        Assert.NotNull(restored);
+        Assert.Equal(2, restored.Count);
+
+        var user = restored["user"] as Dictionary<string, object?>;
+        Assert.NotNull(user);
+        Assert.Equal(1L, user["id"]);
+        Assert.Equal("Alice", user["name"]);
+
+        var items = restored["items"] as List<object?>;
+        Assert.NotNull(items);
+        Assert.Equal(3, items.Count);
+        Assert.Equal(1L, items[0]);
+        Assert.Equal("two", items[1]);
+        Assert.Equal(3.0, items[2]);
+    }
+
+    [Fact]
+    public void SerializesListOfObject()
+    {
+        var list = new List<object> { 1, "hello", true, 3.14, null! };
+
+        var bytes = BinarySerializer.Serialize(list);
+        var restored = BinarySerializer.Deserialize<List<object>>(bytes);
+
+        Assert.NotNull(restored);
+        Assert.Equal(5, restored.Count);
+        Assert.Equal(1L, restored[0]);
+        Assert.Equal("hello", restored[1]);
+        Assert.Equal(true, restored[2]);
+        Assert.Equal(3.14, restored[3]);
+        Assert.Null(restored[4]);
+    }
 }

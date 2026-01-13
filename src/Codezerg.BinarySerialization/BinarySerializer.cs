@@ -323,6 +323,10 @@ public static class BinarySerializer
         if (targetType == typeof(DataSet))
             return ReadDataSet(reader, options);
 
+        // Dynamic object - read based on serialized type
+        if (targetType == typeof(object))
+            return ReadDynamicValue(reader, options);
+
         // Enums
         if (targetType.IsEnum)
         {

@@ -106,6 +106,7 @@ The high-level API supports:
 - Enums
 - Nullable types
 - Collections: Arrays, `List<T>`, `Dictionary<TKey, TValue>`
+- Dynamic: `Dictionary<string, object>`, `List<object>` (values read by serialized type)
 - `DataTable`, `DataSet`, and `IDataReader`
 - Nested objects
 

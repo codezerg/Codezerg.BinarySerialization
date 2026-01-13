@@ -33,7 +33,7 @@ Codezerg.BinarySerialization/
 # Build the solution
 dotnet build
 
-# Run all tests (100 tests)
+# Run all tests (104 tests)
 dotnet test
 
 # Run specific test class
