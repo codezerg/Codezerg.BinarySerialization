@@ -33,7 +33,7 @@ Codezerg.BinarySerialization/
 # Build the solution
 dotnet build
 
-# Run all tests (89 tests)
+# Run all tests (100 tests)
 dotnet test
 
 # Run specific test class
@@ -106,6 +106,7 @@ public class User
 - **Enums**: All enum types (serialized as long)
 - **Nullable**: Nullable<T> for all supported types
 - **Collections**: Arrays, List<T>, Dictionary<TKey, TValue>
+- **ADO.NET**: DataTable, DataSet, IDataReader (serialize only, deserialize as DataTable)
 - **Complex**: Classes and structs (including nested types)
 
 ## Architecture
@@ -135,6 +136,15 @@ Commands enable space-efficient serialization through in-stream definitions:
 - Floats: IEEE 754, big-endian
 - Strings: UTF-8 with byte length prefix
 - Varints: 1-4 bytes depending on value magnitude
+
+### DataTable/DataSet/IDataReader Format
+
+- **DataTable**: Serialized as array of row dictionaries `[{col: val, ...}, ...]`
+- **DataSet**: Serialized as array of DataTables `[DataTable, ...]`
+- **IDataReader**: Same format as DataTable, uses streaming array (row count unknown)
+- Column names use key interning for efficiency
+- Supports `List<>` and `Dictionary<,>` as column values
+- `DBNull.Value` serialized as nil (0xC0)
 
 ## Key Features
 

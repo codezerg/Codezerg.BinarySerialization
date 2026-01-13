@@ -106,6 +106,7 @@ The high-level API supports:
 - Enums
 - Nullable types
 - Collections: Arrays, `List<T>`, `Dictionary<TKey, TValue>`
+- `DataTable`, `DataSet`, and `IDataReader`
 - Nested objects
 
 ### Options
@@ -119,6 +120,35 @@ var options = new SerializerOptions
 
 var bytes = BinarySerializer.Serialize(obj, options);
 ```
+
+### DataTable, DataSet, and IDataReader
+
+Serialize ADO.NET data structures directly:
+
+```csharp
+// DataTable serialization
+var table = new DataTable();
+table.Columns.Add("Id", typeof(int));
+table.Columns.Add("Name", typeof(string));
+table.Rows.Add(1, "Alice");
+table.Rows.Add(2, "Bob");
+
+byte[] bytes = BinarySerializer.Serialize(table);
+var restored = BinarySerializer.Deserialize<DataTable>(bytes);
+
+// DataSet serialization
+var dataSet = new DataSet();
+dataSet.Tables.Add(table);
+byte[] dsBytes = BinarySerializer.Serialize(dataSet);
+var restoredDs = BinarySerializer.Deserialize<DataSet>(dsBytes);
+
+// IDataReader serialization (e.g., from DbCommand.ExecuteReader())
+using var reader = command.ExecuteReader();
+byte[] readerBytes = BinarySerializer.Serialize<IDataReader>(reader);
+var tableFromReader = BinarySerializer.Deserialize<DataTable>(readerBytes);
+```
+
+**Format:** DataTable/IDataReader is serialized as an array of row dictionaries `[{col: val, ...}, ...]`, and DataSet as an array of DataTables. This compact format supports `List<>` and `Dictionary<,>` as column values. IDataReader uses streaming format since row count is unknown upfront.
 
 ## Key Interning
 

@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Data;
 using System.Reflection;
 
 namespace Codezerg.BinarySerialization;
@@ -133,6 +134,18 @@ public static class BinarySerializer
                 return;
             case Guid g:
                 writer.Write(g.ToByteArray());
+                return;
+            case DataTable dataTable:
+                WriteDataTable(writer, dataTable, options);
+                return;
+            case DataSet dataSet:
+                WriteDataSet(writer, dataSet, options);
+                return;
+            case IDataReader dataReader:
+                WriteDataReader(writer, dataReader, options);
+                return;
+            case DBNull:
+                writer.WriteNil();
                 return;
         }
 
@@ -305,6 +318,10 @@ public static class BinarySerializer
             return TimeSpan.FromTicks(reader.ReadInt64());
         if (targetType == typeof(Guid))
             return new Guid(reader.ReadBinary());
+        if (targetType == typeof(DataTable))
+            return ReadDataTable(reader, options);
+        if (targetType == typeof(DataSet))
+            return ReadDataSet(reader, options);
 
         // Enums
         if (targetType.IsEnum)
@@ -426,6 +443,175 @@ public static class BinarySerializer
         }
 
         return obj;
+    }
+
+    private static void WriteDataTable(BinarySerializationWriter writer, DataTable table, SerializerOptions options)
+    {
+        // Serialize as array of dictionaries: [{col: val, ...}, ...]
+        writer.WriteArrayHeader(table.Rows.Count);
+        foreach (DataRow row in table.Rows)
+        {
+            writer.WriteMapHeader(table.Columns.Count);
+            for (int i = 0; i < table.Columns.Count; i++)
+            {
+                var col = table.Columns[i];
+                if (options.UseKeyInterning)
+                    writer.WriteKey(col.ColumnName);
+                else
+                    writer.Write(col.ColumnName);
+
+                var value = row[i];
+                if (value == DBNull.Value)
+                    writer.WriteNil();
+                else
+                    WriteValue(writer, value, col.DataType, options);
+            }
+        }
+    }
+
+    private static void WriteDataSet(BinarySerializationWriter writer, DataSet dataSet, SerializerOptions options)
+    {
+        // Serialize as array of DataTables: [DataTable, DataTable, ...]
+        writer.WriteArrayHeader(dataSet.Tables.Count);
+        foreach (DataTable table in dataSet.Tables)
+        {
+            WriteDataTable(writer, table, options);
+        }
+    }
+
+    private static void WriteDataReader(BinarySerializationWriter writer, IDataReader reader, SerializerOptions options)
+    {
+        // Get column info
+        var fieldCount = reader.FieldCount;
+        var columnNames = new string[fieldCount];
+        for (int i = 0; i < fieldCount; i++)
+        {
+            columnNames[i] = reader.GetName(i);
+        }
+
+        // Use streaming array since row count is unknown
+        writer.BeginArray();
+
+        while (reader.Read())
+        {
+            writer.WriteMapHeader(fieldCount);
+            for (int i = 0; i < fieldCount; i++)
+            {
+                if (options.UseKeyInterning)
+                    writer.WriteKey(columnNames[i]);
+                else
+                    writer.Write(columnNames[i]);
+
+                if (reader.IsDBNull(i))
+                    writer.WriteNil();
+                else
+                    WriteValue(writer, reader.GetValue(i), typeof(object), options);
+            }
+        }
+
+        writer.WriteEnd();
+    }
+
+    private static DataTable ReadDataTable(BinarySerializationReader reader, SerializerOptions options)
+    {
+        var table = new DataTable();
+        var rowCount = reader.ReadArrayHeader();
+        var isUnbounded = rowCount < 0;
+
+        int r = 0;
+        while (isUnbounded ? !reader.IsEnd() : r < rowCount)
+        {
+            var colCount = reader.ReadMapHeader();
+            var rowValues = new Dictionary<string, object?>();
+
+            for (int c = 0; c < colCount; c++)
+            {
+                var colName = reader.ReadKey();
+
+                // Add column if it doesn't exist
+                if (!table.Columns.Contains(colName))
+                    table.Columns.Add(colName, typeof(object));
+
+                if (reader.PeekType() == SerializedType.Nil)
+                {
+                    reader.Skip();
+                    rowValues[colName] = DBNull.Value;
+                }
+                else
+                {
+                    rowValues[colName] = ReadDynamicValue(reader, options);
+                }
+            }
+
+            // Add row with values in column order
+            var row = table.NewRow();
+            foreach (var kvp in rowValues)
+            {
+                row[kvp.Key] = kvp.Value ?? DBNull.Value;
+            }
+            table.Rows.Add(row);
+            r++;
+        }
+
+        if (isUnbounded)
+            reader.ReadEnd();
+
+        return table;
+    }
+
+    private static DataSet ReadDataSet(BinarySerializationReader reader, SerializerOptions options)
+    {
+        var dataSet = new DataSet();
+        var tableCount = reader.ReadArrayHeader();
+
+        for (int t = 0; t < tableCount; t++)
+        {
+            dataSet.Tables.Add(ReadDataTable(reader, options));
+        }
+
+        return dataSet;
+    }
+
+    private static object? ReadDynamicValue(BinarySerializationReader reader, SerializerOptions options)
+    {
+        var valueType = reader.PeekType();
+
+        return valueType switch
+        {
+            SerializedType.Nil => null,
+            SerializedType.Boolean => reader.ReadBoolean(),
+            SerializedType.Integer => reader.ReadInt64(),
+            SerializedType.Float => reader.ReadDouble(),
+            SerializedType.String => reader.ReadString(),
+            SerializedType.Binary => reader.ReadBinary(),
+            SerializedType.Array => ReadDynamicArray(reader, options),
+            SerializedType.Map => ReadDynamicMap(reader, options),
+            _ => throw new InvalidOperationException($"Unexpected serialized type: {valueType}")
+        };
+    }
+
+    private static List<object?> ReadDynamicArray(BinarySerializationReader reader, SerializerOptions options)
+    {
+        var count = reader.ReadArrayHeader();
+        var list = new List<object?>(count);
+        for (int i = 0; i < count; i++)
+        {
+            list.Add(ReadDynamicValue(reader, options));
+        }
+        return list;
+    }
+
+    private static Dictionary<string, object?> ReadDynamicMap(BinarySerializationReader reader, SerializerOptions options)
+    {
+        var count = reader.ReadMapHeader();
+        var dict = new Dictionary<string, object?>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var key = reader.ReadKey();
+            var value = ReadDynamicValue(reader, options);
+            dict[key] = value;
+        }
+        return dict;
     }
 
     private static bool IsTypeCompatible(SerializedType serializedType, Type targetType)
